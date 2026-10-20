@@ -386,3 +386,38 @@ ERP 侧 `global_item_id=0` 时根本给不出。
 
 **判据**：任何「供应商起订量/最小采购量」类字段，都先找**列表接口的批量返回**，
 再考虑逐页探测。
+
+## 27. 「已发布」有两套名单，撤下商品要分清是哪一套
+
+ERP 里同一件货出现在**两个地方**，语义不同，撤下时得分别处理：
+
+| 接口 | 含义 | 能删吗 |
+|---|---|---|
+| `/publishRecord` | 发布记录（每次发布尝试一条） | **能**：`/api/shopee_swarm/delRecord` {id} |
+| `/shopProductsList` | 店铺商品记录（ERP 侧待推送/上架状态） | **不能**：没有删除接口 |
+
+**`delRecord` 是唯一能删发布记录的接口**（前端 chunk 里藏在 20 个 endpoint 中间，
+不 grep `ShopProduct` 根本发现不了 —— 要把整个 `/api/shopee_swarm/*` 列表拉出来看）。
+
+**完整撤下顺序**（已发布过的商品）：
+1. `delRecord` 删发布记录 → 商品从「已发布」报表消失
+2. `deleteClaimGoods` 删认领记录
+3. `/api/Collect/deleteGoods` 删采集箱条目
+4. **残留**：`shopProductsList` 里的待推送记录**删不掉**，
+   落 watchlist，等店铺同步后用 `unlistShopProduct` 收尾
+
+**为什么残留删不掉**：7 店未同步时 ERP 拿不到 Shopee 侧 `item_id`，
+而 `unlistShopProduct` / `getShopProductDetail` / `updateShopProduct` 全都要这个 id，
+`unlistShopProduct` 还会返回 `code=1000 下架成功` 但商品**仍在列表**（假成功）。
+
+**判据**：判断「某商品还在不在已发布里」要问的是
+**`publishRecord` 里还有没有它的记录**，不是 `shopProductsList` 里还有没有。
+只看后者会以为「撤不下来」而重复操作。
+
+## 28. 查不到的字段不能默认成「最宽松的那个」
+
+起订量查不到时若默认当 1，闸门会放行本该拦下的货；
+查不到时若默认当「不可发布」，又会卡住明明合规的货（手动采的货不在整店数据里）。
+
+正确做法：**「查不到」单列一档，单独报告**，
+由人决定是补查还是放行 —— 不要在代码里偷偷替它选一个默认值。
