@@ -192,5 +192,23 @@ FROZEN/艾莎包装盒（纸上印 FROZEN，商品本体反而没印）。
 
 ## 选品硬约束
 
-家居生活小件；价格区间 **15–100 元，不放宽**；1 件起售；含包装重量 ≤1KG；
-排除带电 / 毛绒玩具 / 服装鞋帽袜 / 食品 / 药品保健品 / 美妆护肤 / 硬 IP。
+家居生活小件；价格区间 **15–100 元，不放宽**；**1 件起售（起订量必须 = 1）**；
+1 件起订；含包装重量 ≤1KG；排除带电 / 毛绒玩具 / 服装鞋帽袜 / 食品 / 药品保健品 /
+美妆护肤 / 硬 IP。
+
+### 起订量（MOQ）必须 = 1
+
+**商业模式是「一件代发，绝不囤货」** —— 2 件起订的货连一件都发不出去，
+50 件起订的更是完全不可做。价格区间合规 ≠ 能做。
+
+取值来源（按可信度）：
+1. 1688 列表接口 mtop 原始响应的 `_raw.quantityBegin` —— 整店一次拿全，最便宜
+2. 详情页 `window.context.result.data.processingPrice.fields.beginAmount`
+3. 详情页 `mainPrice.fields.finalPriceModel.tradeWithoutPromotion.offerBeginAmount`
+
+**不可信**：`orderParamModel.orderParam.beginNum` —— 实测与列表值打架时以列表为准
+（某商品列表=2、该字段=1，实际是 2 件起订）。
+
+**手动采的货不在列表数据里**，必须单独查起订量；查不到不能默认当 1。
+
+`kjx_filter_price.py --max-moq 1`（默认就是 1）自动剔除超起订量的货。

@@ -359,3 +359,30 @@ ERP 侧 `global_item_id=0` 时根本给不出。
 
 **判据**：批量跑外部模型时，先量「每张图的固定开销」。
 固定开销（上传/下载）能并行化，模型调用本身才是真并发。
+
+## 26. 1688 起订量（MOQ）在列表接口里，不在详情页
+
+**业务前提**：一件代发、绝不囤货 → **只做 1 件起订的货**。
+价格区间合规不等于能做：2 件起订发不出单，50 件起订完全不可做。
+
+**MOQ 从哪读**：
+- **列表接口 mtop 原始响应 `_raw.quantityBegin`** —— 整店一次拿全，
+  比逐个开详情页快一个量级（61 件一次拿到）。
+- 详情页兜底：`processingPrice.fields.beginAmount` /
+  `mainPrice.fields.finalPriceModel.tradeWithoutPromotion.offerBeginAmount`。
+- **别信** `orderParamModel.orderParam.beginNum` —— 实测某商品列表=2、
+  该字段=1，实际是 2 件起订，以列表为准。
+
+**坑**：
+- 详情页 `processingPrice` **不是每页都有**（单一价格的商品没有阶梯价，
+  这个 key 直接缺失）→ 不能只读这一个 key。
+- 详情页 `window.context.result.data` 要**轮询等就绪**（最多 20×2s），
+  否则读到 null 会误判成「没有阶梯 = 1 件起订」。
+- 手动采的货不在列表数据里 → 得按店铺 memberId 单独查；
+  memberId 从详情页 context 里正则捞 `b2b-[0-9a-z]+`（字段层级各页不同，别按 key 名取）。
+- **列表接口必须在页面内 `fetch` 发**（带 cookie），纯 Node 直连会被防盗链拦成 captcha。
+- 货源商品可能**已经下架**（详情页跳 1688 首页 `notfound`）→ 起订量查不到，
+  这时不能默认当 1 件起订。
+
+**判据**：任何「供应商起订量/最小采购量」类字段，都先找**列表接口的批量返回**，
+再考虑逐页探测。

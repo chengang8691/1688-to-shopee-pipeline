@@ -137,9 +137,12 @@ python scripts\kjx_batch_run.py --apply --no-fetch --ids-file recon\wave2_run_id
 
 ```powershell
 python scripts\kjx_audit.py
+python scripts\kjx_audit.py --ids-file recon\本批_claimids.txt   # 只审这一批
 ```
 
 输出「N 品 / M 项全部通过」。**用的是修复过分页的版本**——修复前它只查 200 条却报「全部通过」。
+
+检查项含 **起订量 = 1**（硬约束，查不到起订量也算不过）。
 
 ---
 
@@ -151,6 +154,20 @@ python scripts\kjx_publish.py --apply --discount 0 --ids-file recon\wave2_publis
 
 - `--ids-file` 而不是 `--ids`：PowerShell 传 297 个 id 会转义炸
 - `price_discount` 一律 0
+- **发布前有起订量闸门**（2026-10-20）：起订量 > 1 的货**一件都不发**，
+  闸门不通过直接中止，`--force-moq` 可强推（只在人工逐件确认后用）
+
+### 起订量闸门（硬约束）
+
+```powershell
+python scripts\kjx_moq_gate.py --claims-file recon\本批_claimids.txt   # 按认领 id
+python scripts\kjx_moq_gate.py --offers-file recon\ids.txt              # 按 offerId
+python scripts\kjx_moq_gate.py --published                              # 查已发布商品
+```
+
+- 退出码：0 全过 / 1 有起订量违规 / 2 有查不到的（**默认查不到 = 不可发布**）
+- 全局起订量表在 `recon/moq_global.json`，由 `kjx_moq.py` 单一维护
+- **查不到 ≠ 1 件起订**。手动采的货不在列表数据里，必须单独查。
 - 一次发布到「企业」<MERCHANT_ID> = 铺满旗下 7 个 <你的店铺名> 店（<店铺 id 区间>）
 - 发布后核对：`python scripts\kjx_publish_records.py`、`python scripts\kjx_wave2_verify.py`
 
