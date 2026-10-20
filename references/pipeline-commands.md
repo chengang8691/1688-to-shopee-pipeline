@@ -247,3 +247,57 @@ python scripts\kjx_vlm_review.py --ids-file recon\novlm_ids.txt --from-erp-ids r
 ## 一次性修复脚本
 
 `recon/_fix_paging.py` 跑完即可删。
+
+## 换一家 1688 店开新批次（整店侦察 → 认领 → 写回 → 终检）
+
+**参数化后的跨批次标准流程**。默认路径都指向上一批，跑之前先确认每条命令读的
+是不是本批文件（见 traps 31、32）。
+
+```powershell
+Set-Location "<PROJECT_ROOT>"
+$env:PYTHONIOENCODING="utf-8"
+$env:KJX_MEMBER="<MEMBER_ID>"          # 必填：店铺 memberId，缺失直接报错退出
+
+# 1) 整店侦察（mtop 列表接口一次拿全，含起订量 _raw.quantityBegin）
+node scripts\kjx_harvest_mtop.js <店铺URL> <out.json> *> recon\_harvest.log
+
+# 2) 同款去重（并查集 + 主图原图 basename + 归一化标题）
+python scripts\kjx_dedupe_umbrella.py
+
+# 3) 品类筛（排带电/LED 等）
+python scripts\kjx_umbrella_screen.py
+
+# 4) VLM 主图 IP 预筛 + 生成放行/拦截清单
+python scripts\kjx_vlm_review.py --ids-file recon\<batch>_vlm_ids.txt --imgs 5
+python scripts\kjx_final_list.py --cand recon\<batch>_cands.json --ids-file recon\<batch>_vlm_ids.txt --out-prefix <batch>_
+
+# 5) 采集入库（详情页插件路径，不需 1688 授权）
+node scripts\kjx_fetch_both.js 2 --file recon\<batch>_vlm_ids.txt --gap 10000 *> recon\_fetch.log
+
+# 6) 认领（--box 指定本批采集箱映射；破坏性，先问用户）
+python scripts\kjx_make_claim_list.py --out <batch> --pass recon\<batch>_final_passlist.txt --box recon\<batch>_collect_map.json --apply
+
+# 7) offerId -> 认领 id 映射
+python scripts\kjx_map_claims.py --ids-file recon\<batch>_claim_ids.txt --out recon\<batch>_claimids.txt
+
+# 8) 逐图宣传字样检测（主图+详情图，--out 写本批弃图清单）
+python scripts\kjx_img_promo_scan.py --ids-file recon\<batch>_claimids.txt --out recon\<batch>_promo_imgs.json
+
+# 9) 七环写回（--promo 指定本批弃图清单；--missing-weight 兜底件重）
+$ids = (Get-Content recon\<batch>_claimids.txt) -join ','
+python scripts\kjx_batch_run.py --apply --no-fetch --claim-ids $ids --missing-weight 1.00 --promo recon\<batch>_promo_imgs.json
+
+# 10) 标题写回 + 终检 + 起订量闸门
+python scripts\kjx_check_title.py recon\<batch>_titles.json
+python scripts\kjx_set_title.py --map recon\<batch>_titles.json --apply
+python scripts\kjx_audit.py --ids-file recon\<batch>_claimids.txt
+python scripts\kjx_moq_gate.py --claims-file recon\<batch>_claimids.txt
+```
+
+**踩过的坑（会静默出错的那种）**：
+- `kjx_make_claim_list.py` 认领依据是 `recon/boxid_by_offer.json`，
+  **新店必须传 `--box`**，否则匹配数会是 0。
+- 认领箱的货源 id **只在 `source_url` 里**，`/index` 没有独立 offerId 字段。
+- 终检的件重口径要和写回一致：件重缺失按保守值核对（不判失败），运费缺失才判失败。
+- `kjx_audit.py` 只审 `--ids-file` 指定的本批，不要跑全量（认领箱几百条）。
+- 标题写回前先 `kjx_check_title.py` 自检（禁词表在 `kjx_rules.py`）。

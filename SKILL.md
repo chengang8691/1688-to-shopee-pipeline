@@ -32,7 +32,7 @@ description: |
 |---|---|---|
 | 0 采集 | 1688 列表全量 → 详情页一趟取「件重+运费+入库」 | `kjx_harvest_mtop.js` → `kjx_fetch_both.js` |
 | 1 IP 预筛 | 主图拼长图 → 外部 VLM 判三栏 → 拦/放行清单 | `kjx_vlm_review.py` `kjx_vlm_retry.py` `kjx_final_list.py` |
-| 2 认领 | 放行件 ∩ 已入库 ∩ 未认领 → 认领到 platformId=78 | `kjx_make_claim_list.py` |
+| 2 认领 | 放行件 ∩ 已入库 ∩ 未认领 → 认领到 platformId=78 → offerId 映射成认领 id | `kjx_make_claim_list.py` `kjx_map_claims.py` |
 | 3 标题 | 逐条手写三段式 → 自检 → 写回 + 回读校验 | `kjx_check_title.py` `kjx_set_title.py` |
 | 4 七环写回 | 重量/库存888/结算价/描述过滤/详情图裁12/欢迎语 | `kjx_batch_run.py` |
 | 5 终检 | 全量认领箱逐条核对 | `kjx_audit.py` |
