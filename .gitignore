@@ -1,0 +1,13 @@
+# 凭证与本地数据一律不进仓库
+token.txt
+*.token
+.env
+.env.*
+recon/
+scripts/
+out/
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

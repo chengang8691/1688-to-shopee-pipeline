@@ -1,0 +1,174 @@
+# 业务规则与 IP 判定
+
+所有阈值与黑名单的**单一来源**是 `<PROJECT_ROOT>/scripts/kjx_rules.py`。
+脚本里另写一份是历史上最大的 bug 来源（终检与写回规则不一致 → 误报/漏报）。
+
+## 规则常量
+
+```python
+DROP_DESC_KEYS  # 23 项 1688 B2B 字段（描述行首 + attribute_maps.key 必须同时清）
+DETAIL_MAX = 12 # 详情图上限
+MAIN_MAX = 9    # 主图上限
+SET_STOCK = 888 # SKU 库存
+FREIGHT_FLAT = 2.5  # 货代费
+MARKUP = 1.35   # 加价系数
+CUP_WHITELIST = ["dodge", "道奇", "tritan", "remarkable", "decup", "believe"]
+```
+
+## 描述过滤：23 项 DROP_DESC_KEYS
+
+**判断依据是「字段名 + 字段值」，不只是字段名。**
+
+被删的典型：是否IP授权 / 是否支持订制 / 主要下游平台(ebay,亚马逊,wish,速卖通,独立站,LAZADA) /
+主要销售地区 / 有可授权的自有品牌 / 贸易属性:内贸 / 全国工业生产许可证编号 /
+是否属于礼品 / 送礼用途 / 适用节日 / 适用送礼场合 / 适用送礼关系 / 适用送礼对象 / 产品质量等级
+
+**「送礼用途」的值含「广告礼品,促销赠品,嘉奖纪念,公关礼品」——代工味比「贸易属性:内贸」更重**，
+一只水杯的零售页这么写等于告诉买家这是企业采购渠道。
+
+**清的时候必须同时清两处**：`simple_description` 行首 + `attribute_maps.key`。
+只清一个，另一个照样显示。
+
+**保留的 32 个 key 都是消费者选购会看的规格**：材质/容量/保温性能/杯盖类型/杯口口径/
+是否带茶隔/是否显示温度… 保留是正确的。
+`货号`、`产品上市时间` 属弱 B2B 信号，用户明确「其余 1688 字段不动」，故保留。
+
+## IP 判定
+
+### 拦（硬 IP）
+
+Disney/米老鼠/艾莎、ZOOTOPIA 角色、库洛米/大耳狗/美乐蒂/布丁狗/轻松熊、
+美少女战士、小马宝莉、海绵宝宝、蜡笔小新、帕恰狗、Pingu、蛋仔派对 EGGY PARTY、
+元梦之星、奥特曼 ULTRAMAN、胡迪/三眼仔/叉飞侠/扎克大王、
+Scribbled Kitty/Puppy/Kapibara 仿款、BIG MAC
+
+三丽鸥黑名单要**连角色名一起列**（家族名不够）：草莓熊/轻松熊/rilakkuma/korilakkuma/
+蛋黄哥/酷企鹅/帕恰狗… 只列 `sanrio/大耳狗/美乐蒂` 会漏掉一整类儿童杯。
+
+**《疯狂动物城》角色名要列全**——只写 `zootopia` 会漏：
+朱迪 Judy Hopps、尼克 Nick Wilde、芬妮克 Finnick、贝儿 Bellwether 等同系列角色。
+（已补进 `kjx_rules.py`，见下节。）
+
+### 已补进 `kjx_rules.py` 的 `VLM_HARD_ROLE`（2026-10-20 加固）
+
+原名单只有 `zootopia`/`judy hopps`/`judy`/`朱迪`，**缺 Nick Wilde、Fin nick、
+Bellwether 等同系列角色名**——只印尼克不印朱迪的件会漏。
+
+已补入：疯狂动物城系列（`nick wilde`/`finnick`/`fin nick`/`bellwether`/`bjyorn`/
+`mercy mudhole`/`mr. big`）、三丽鸥其余角色（`keroppi`/`peppino`/`hangyodon`/
+`badtz-maru`/`refululu`）、`snoopy`/`charlie brown`、经典动画完整词组
+（`tom and jerry`/`bugs bunny`/`daffy duck`/`scooby-doo`/`garfield`/`mickey mouse`/
+`donald duck`/`kermit`/`cookie monster`…）、宝可梦（`pikachu`/`pokemon`/`charizard`…）、
+蜡笔小新人物（`nohara`/`himawari`/`reigen`）、`totoro`。
+
+**同时把匹配从子串改成词边界**（`kjx_rules._match_word`）：
+含英文的词只认独立词，纯中文词仍用子串。
+原因：子串匹配会让 `pony` 命中 `company`、`tom` 命中 `CHICU TOM`——
+实测 4 件自有厂牌 `CHICU TOM` 被误判。
+改完回扫 375 件，命中列表与改动前完全一致，**零新增误伤**。
+
+**加名单的铁律：只加完整词组，不加裸单词。**
+
+### 放行（通用动物 + 自有厂牌）
+
+通用形象：熊猫/兔子/小熊/小狗/水豚/柯基/恐龙/机器人/笑脸花朵等。
+自有厂牌（不写进标题即可）：PANDA / SHOTAY / ST-YIBEN / TYESO / SITARAYURI / GUodday /
+VOGUE / CRUHRE / GIAVOS / Bichar / FAUNA / Baoluocc / BIGCAR
+
+### 例外
+
+DODGE（道奇）按杯子白名单放行——美国卖车的，杯子无关。
+
+### 扫描面：四处同扫
+
+```python
+vlm_verdict_final(vdb, offer_id, title)
+# 扫 = 1688原标题 + VLM角色栏 + VLM英文词栏 + VLM厂牌栏
+```
+
+**调用时必须传 title 参数**，漏传就漏掉标题层的 IP。
+
+漏检实录（两边各漏 2 件）：
+
+| offerId | 漏在哪 | 内容 |
+|---|---|---|
+| <OFFER_ID> | 只有标题有 | 标题「卡通元梦之星儿童…」，VLM 只写「戴动物头套的卡通女孩」 |
+| <OFFER_ID> | 只有标题有 | 标题「卡通蛋仔派对儿童塑料杯…」，VLM 只写「卡通小人」 |
+| <OFFER_ID> | 只有厂牌栏有 | 厂牌「EGGY PARTY」（蛋仔派对，已有侵犯著作权罪判例） |
+| <OFFER_ID> | 只有厂牌栏有 | 厂牌「DODGE Pochacco」，角色栏只写「黑白小狗」 |
+
+**角色栏写「无」不代表干净**——<OFFER_ID> 角色栏只写「黑白小狗」，厂牌栏是 Pochacco，仍是硬 IP。
+
+### VLM 三栏输出格式
+
+```
+卡通角色: 无/有 | 角色描述 | 英文词: 无/有 | 英文词内容 | 厂牌: 无/有 | 厂牌名
+```
+
+**第三栏（厂牌）是 IP 的富矿**——蹭牌仿品常把 IP 名当厂牌印，标题层和角色栏都看不出来。
+
+### 蹭牌仿品只能靠看主图发现
+
+标题层黑名单只能挡住「明说角色名」的。1688 上大量蹭牌仿品标题只写「卡通/可爱/萌熊/ins」，
+图案要看图才知道。实测一批 44 件水杯标题层 0 命中，主图 contact sheet 抓出：
+Hello Kitty 仿款（白脸+粉腮+蝴蝶结+"Scribbled Kitty"）、史努比仿款（"HAPPY DOG"）、
+FROZEN/艾莎包装盒（纸上印 FROZEN，商品本体反而没印）。
+
+**主图复核环节不能省，且要看每个商品的全部主图**（主图#1 干净不代表 #3 干净）。
+
+### 实证：人工读图也会漏，VLM 预筛是刚需层
+
+**批次3 第一波用人工读 contact sheet 复核 44 件，漏掉了 1 件硬 IP**——
+`<OFFER_ID>`（claim <CLAIM_ID>，base_item_id <BASE_ITEM_ID>），VLM 描述明确写着
+「卡通角色: 有 | 美少女战士头像+水手+爱心+表情」，标题却是
+「简约大容量塑料杯男女生健身运动水壶…」，**标题层零风险词**，人工看图时被漏过。
+这件已上架。
+
+是靠后来的**回溯筛查**（`kjx_ip_audit_claimed.py`）抓出来的，
+不是第一波发现的。**教训：人工读图 ≠ 覆盖度，VLM 全量预筛才能保证不漏。**
+
+补判 26 件老批次（第一批 11 + 批次2 15，只做过人工判图）后，
+**除 <CLAIM_ID> 外没有第二件漏网**——那 26 件里 VLM 标的 IP 全部是通用动物形象，
+按用户裁定放行；13 件 WORD 是自有厂牌。
+
+**结论：364 已发布品中，硬 IP 恰好 1 件（<CLAIM_ID>）。**
+
+
+## 重量规则
+
+```
+件重 < 1KG  → 1.00
+件重 > 1KG  → 件重 + 500g
+件重 = 1.00 → 不动
+```
+
+**属性表里的「重量 0.3kg」是 ERP 默认占位值，永远不可信**（实测多个商品都显示 0.3kg，
+真实值分别 500g / 300g / 330g）。
+
+可靠来源按优先级：
+1. `window.context.result.data.productPackInfo.fields.unitWeight`（单位 kg）×1000
+2. 滚到底触发懒渲染后，「商品件重尺」表里 `重量(g)` 列（页面文本形如 `重量(g) | 500`）
+3. `window.context` 里任意深度的 `pieceWeightScaleInfo` 数组（老商品有）
+
+## 结算价规则
+
+```
+结算价 = (采购价 + 运费 + 货代费 2.5) × 1.35
+```
+
+- 运费统一按**广西南宁**（收货地是页面级状态，刷新即回默认）
+- **逐 SKU 档计算，顶层取最小**
+- 只写 `settlement_price`，**`price` 不动**
+- 已实测件重分布 100–800g 为主；<店铺A>运费 ¥5，雨伞 ¥3
+
+## 图片规则
+
+- 主图上限 **9 张**，**不足不补**（有几张放几张，不从详情图挑图补位），超了截前 9
+- 详情图上限 **12 张**
+- 库存 888
+- 发布折扣一律 **0%**
+
+## 选品硬约束
+
+家居生活小件；价格区间 **15–100 元，不放宽**；1 件起售；含包装重量 ≤1KG；
+排除带电 / 毛绒玩具 / 服装鞋帽袜 / 食品 / 药品保健品 / 美妆护肤 / 硬 IP。
