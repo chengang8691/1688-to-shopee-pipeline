@@ -301,3 +301,53 @@ python scripts\kjx_moq_gate.py --claims-file recon\<batch>_claimids.txt
 - 终检的件重口径要和写回一致：件重缺失按保守值核对（不判失败），运费缺失才判失败。
 - `kjx_audit.py` 只审 `--ids-file` 指定的本批，不要跑全量（认领箱几百条）。
 - 标题写回前先 `kjx_check_title.py` 自检（禁词表在 `kjx_rules.py`）。
+
+## 换品类批次：品类筛选脚本要自己写
+
+不同品类的「排除项」和「别名词表」都不一样，别照抄上一批。
+`kjx_shizhi_screen.py`（键帽）是一个可直接改的模板：
+
+```powershell
+# 1) 整店侦察（memberId 必填，缺失 fail-fast）
+$env:KJX_MEMBER="<MEMBER_ID>"
+node scripts\kjx_harvest_mtop.js 40 30 - shop_<batch>_all "<店铺URL>" *> recon\_harvest.log
+
+# 2) 品类筛选（排除项 -> 品类 -> 起订量，顺序固定）
+python scripts\kjx_shizhi_screen.py          # -> recon\shizhi_cands.json
+
+# 3) 同款去重（并查集 + 主图原图 basename + 归一化标题）
+python scripts\kjx_dedupe_umbrella.py recon\shizhi_cands.json shizhi
+
+# 4) 标题层 IP 过滤（明确 IP 直接排，存疑的交 VLM 看图）
+python scripts\kjx_shizhi_ip_title.py
+
+# 5) VLM 主图 IP 预筛（主图来源是 recon\*_all.json 通配，新店自动纳入）
+python scripts\kjx_vlm_review.py --ids-file recon\shizhi_ip_cleared_ids.txt --imgs 5
+
+# 6) 采集入库
+node scripts\kjx_fetch_both.js 2 --file recon\shizhi_final_passlist.txt --gap 10000 *> recon\_fetch.log
+
+# 7) 生成本批采集箱映射（认领脚本默认读的是别的批次）
+python scripts\kjx_shizhi_collect_map.py
+
+# 8) 认领（破坏性，先问用户）
+python scripts\kjx_make_claim_list.py --out shizhi --pass recon\shizhi_ip_cleared_ids.txt --box recon\shizhi_collect_map.json --apply
+
+# 9) offerId -> 认领 id
+python scripts\kjx_map_claims.py --ids-file recon\shizhi_claim_ids.txt --out recon\shizhi_claimids.txt
+
+# 10) 逐图宣传字样 -> 七环写回 -> 标题 -> 终检
+python scripts\kjx_img_promo_scan.py --ids-file recon\shizhi_claimids.txt --out recon\shizhi_promo_imgs.json
+$ids = (Get-Content recon\shizhi_claimids.txt) -join ','
+python scripts\kjx_batch_run.py --apply --no-fetch --claim-ids $ids --missing-weight 1.00 --promo recon\shizhi_promo_imgs.json
+python scripts\kjx_set_title.py --map recon\shizhi_titles.json --apply
+python scripts\kjx_audit.py --ids-file recon\shizhi_claimids.txt
+python scripts\kjx_moq_gate.py --claims-file recon\shizhi_claimids.txt
+```
+
+**别踩的坑**：
+- `kjx_vlm_review.py` / `kjx_final_list.py` / `kjx_umbrella_verify_collect.py` **无 argparse**，
+  跑之前必须显式传全参数，否则会跑默认分支**覆盖上一批的产物**。
+- 详情图多的品类（键帽 44 张/件），VLM 逐图判定很慢；
+  可用 `scripts/kjx_detail_sheet.py <claim_id> [张数]` 拼 contact sheet 人工抽查。
+- 未判定的图（下载/上传失败）要**人工过一遍**，别默认当干净。
