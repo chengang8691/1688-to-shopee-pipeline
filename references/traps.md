@@ -323,3 +323,39 @@ ERP 侧 `global_item_id=0` 时根本给不出。
 - `Remove-Item` 被安全策略禁止 → 用 Python `os.remove`
 - `mcode-tools` 是 .cmd 包装，subprocess 直接 exec 会 FileNotFoundError → 必须 `shell=True`
 - 读文件 `Get-Content` 不加 `-Encoding UTF8` 会静默损坏中文（PS 5.1 默认 ANSI/GBK）
+- **GBK 控制台打不出 `✓` / emoji** → 脚本里 `print('✓ ...')` 会抛
+  `UnicodeEncodeError` 把**检查结果本身**冲掉。
+  修法：脚本开头 `sys.stdout.reconfigure(encoding='utf-8', errors='replace')`，
+  或改用 ASCII 符号。**报错信息是 UnicodeEncodeError 时，先怀疑它掩盖了什么。**
+
+## 24. 并发 worker 共享同一个 `--args-file` 会把结果对错号
+
+**现象**：6 个线程并发调外部 VLM，各写各的却都写 `recon/_promo_call.json`。
+线程 A 写完还没被 CLI 读走，线程 B 就把文件覆盖了 —— **不报错**，
+但「描述属于 A 的图，却被记到 B 的 URL 上」。
+
+**后果比报错更糟**：图片合规判定（弃用带「源头工厂」的图）会张冠李戴，
+该弃的留着、不该弃的删掉，而且**回读校验也发现不了**（每个 URL 都「有」一条描述）。
+
+**修法**：`args_file = '_promo_call_%d.json' % worker_tag`（每个 worker 一个文件）。
+
+**通用判据**：任何「写临时文件 → 外部 CLI 读它」的并发模式，
+临时文件必须**按 worker 隔离**。共享文件 = 隐形的错配。
+
+## 25. 逐图 VLM 的瓶颈是上传，不是模型调用
+
+实测一批 1031 张图：
+- 串行：~10.4 s/图 → **2.9 小时**
+- 并行（下载 12 线程 / 上传 12 线程 / VLM 6 线程）→ **约 15 分钟**
+
+关键点：
+- `describe_images` **不吃原始 CDN URL**：
+  报 `image_info.url could not be used as a media source`，必须先
+  `mcode-tools upload_temp_url <本地文件>` 换 temp_url。
+  所以**每张图一次上传是绕不开的**，这就是瓶颈所在。
+- 上传是**独立的 CLI 调用**，天生可并行 —— 这才是提速的正确切口。
+- 两级缓存（`_promo_upload_cache.json` / `_promo_vlm_cache.json`）让重跑几乎免费；
+  缓存**按 URL 存**（不是按顺序），否则并发乱序会把结果配错。
+
+**判据**：批量跑外部模型时，先量「每张图的固定开销」。
+固定开销（上传/下载）能并行化，模型调用本身才是真并发。
