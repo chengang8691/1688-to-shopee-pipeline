@@ -87,7 +87,7 @@ after = api('/getClaimGoodsInfo', tok, {'id': gid, 'platform_id': 78})
 ```python
 ROOT = r'<PROJECT_ROOT>'          # 项目根写死，换机器只改这一处
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))   # 让 import kjx_rules / kjx_paging 可用
-tok = io.open(os.path.join(ROOT, 'token.txt'), encoding='utf-8').read().strip()
+tok = io.open(os.path.join(ROOT, '<TOKEN_FILE>'), encoding='utf-8').read().strip()
 ```
 
 **token 不进上下文、不打印、不写进记忆。**

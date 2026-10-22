@@ -69,9 +69,9 @@ ERP 端点全在 `erp2-api-*.js` 里，形如 `xx=(e={})=>m('/api/xxx',e)`，
 
 ## 认证
 
-- token 在 `<PROJECT_ROOT>\token.txt`，请求头 `token: <值>`
+- token 在 `<PROJECT_ROOT>\<TOKEN_FILE>`，请求头 `token: <值>`
 - 成功码 `code=1000`
-- token 失效时返回别的 code，脚本会直接抛异常——先确认 `token.txt` 存在且非空
+- token 失效时返回别的 code，脚本会直接抛异常——先确认 `<TOKEN_FILE>` 存在且非空
 
 ## 已发布历史（截至 2026-10-20）
 

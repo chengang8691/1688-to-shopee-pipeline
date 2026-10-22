@@ -19,7 +19,7 @@ description: |
 
 1. **只走跨境X自家后台**：`<ERP_API_HOST>/api/*` 与 `<ERP_WEB_HOST>/api/*`。
    **绝不直接用 API 连 Shopee 卖家中心**。跨境X → Shopee 那一跳由平台用用户店铺授权完成。
-2. **凭证不进上下文**：token 存 `<PROJECT_ROOT>\token.txt`，脚本用 `--token-file token.txt`。
+2. **凭证不进上下文**：token 存 `<PROJECT_ROOT>\<TOKEN_FILE>`，脚本用 `--token-file <TOKEN_FILE>`。
    不要把 token 打印、粘贴进对话或写进记忆。
 3. **破坏性操作先问用户**：认领、删除、发布这三类动作执行前必须拿到用户明确确认。
    读操作（体检、终检、状态查询）可直接跑。
